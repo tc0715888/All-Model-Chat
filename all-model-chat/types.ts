@@ -99,9 +99,9 @@ export interface AppSettings extends ChatSettings {
 
 
 export interface GeminiService {
-  getAvailableModels: (apiKeyString: string | null) => Promise<ModelOption[]>;
-  uploadFile: (apiKey: string, file: File, mimeType: string, displayName: string, signal: AbortSignal) => Promise<GeminiFile>;
-  getFileMetadata: (apiKey: string, fileApiName: string) => Promise<GeminiFile | null>;
+  getAvailableModels: (apiKeyString: string | null, appSettings?: AppSettings) => Promise<ModelOption[]>;
+  uploadFile: (apiKey: string, file: File, mimeType: string, displayName: string, signal: AbortSignal, appSettings?: AppSettings) => Promise<GeminiFile>;
+  getFileMetadata: (apiKey: string, fileApiName: string, appSettings?: AppSettings) => Promise<GeminiFile | null>;
   sendMessageStream: (
     apiKey: string,
     modelId: string,
@@ -114,7 +114,8 @@ export interface GeminiService {
     onChunk: (chunk: string) => void,
     onThoughtChunk: (chunk: string) => void,
     onError: (error: Error) => void,
-    onComplete: (usageMetadata?: UsageMetadata) => void
+    onComplete: (usageMetadata?: UsageMetadata) => void,
+    appSettings?: AppSettings
   ) => Promise<void>;
   sendMessageNonStream: (
     apiKey: string,
@@ -126,11 +127,12 @@ export interface GeminiService {
     thinkingBudget: number,
     abortSignal: AbortSignal,
     onError: (error: Error) => void,
-    onComplete: (fullText: string, thoughtsText?: string, usageMetadata?: UsageMetadata) => void
+    onComplete: (fullText: string, thoughtsText?: string, usageMetadata?: UsageMetadata) => void,
+    appSettings?: AppSettings
   ) => Promise<void>;
-  generateImages: (apiKey: string, modelId: string, prompt: string, aspectRatio: string, abortSignal: AbortSignal) => Promise<string[]>;
-  generateSpeech: (apiKey: string, modelId: string, text: string, voice: string, abortSignal: AbortSignal) => Promise<string>;
-  transcribeAudio: (apiKey: string, audioFile: File, modelId: string, isThinkingEnabled: boolean) => Promise<string>;
+  generateImages: (apiKey: string, modelId: string, prompt: string, aspectRatio: string, abortSignal: AbortSignal, appSettings?: AppSettings) => Promise<string[]>;
+  generateSpeech: (apiKey: string, modelId: string, text: string, voice: string, abortSignal: AbortSignal, appSettings?: AppSettings) => Promise<string>;
+  transcribeAudio: (apiKey: string, audioFile: File, modelId: string, isThinkingEnabled: boolean, appSettings?: AppSettings) => Promise<string>;
 }
 
 export interface ThoughtSupportingPart extends Part {
