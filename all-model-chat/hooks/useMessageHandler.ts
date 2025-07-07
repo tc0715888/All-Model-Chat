@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { AppSettings, ChatMessage, UploadedFile, ChatSettings as IndividualChatSettings, ChatHistoryItem } from '../types';
 import { generateUniqueId, buildContentParts, pcmBase64ToWavUrl, createChatHistoryForApi, getKeyForRequest } from '../utils/appUtils';
 import { geminiServiceInstance } from '../services/geminiService';
-import { Chat, UsageMetadata } from '@google/genai';
+import { UsageMetadata } from '@google/genai';
 import { logService } from '../services/logService';
 
 interface MessageHandlerProps {
@@ -125,7 +125,6 @@ export const useMessageHandler = ({
 
         if (!overrideOptions) { setInputText(''); setSelectedFiles([]); }
 
-        // --- TTS Model Logic ---
         if (isTtsModel) {
             logService.info("Handling TTS model request.");
             const userMessage: ChatMessage = { id: generateUniqueId(), role: 'user', content: textToUse.trim(), timestamp: new Date() };
@@ -134,17 +133,14 @@ export const useMessageHandler = ({
             setMessages(prev => [...prev, userMessage, { id: modelMessageId, role: 'model', content: '', timestamp: new Date(), isLoading: true, generationStartTime: new Date() }]);
             
             try {
-                const base64Pcm = await geminiServiceInstance.generateSpeech(keyToUse, activeModelId, textToUse.trim(), currentChatSettings.ttsVoice, currentSignal);
+                // MODIFIED: Pass appSettings
+                const base64Pcm = await geminiServiceInstance.generateSpeech(keyToUse, activeModelId, textToUse.trim(), currentChatSettings.ttsVoice, currentSignal, appSettings);
                 if (currentSignal.aborted) { throw new Error("aborted"); }
                 
                 const wavUrl = pcmBase64ToWavUrl(base64Pcm);
                 
                 setMessages(prev => prev.map(msg => msg.id === modelMessageId ? {
-                    ...msg,
-                    isLoading: false,
-                    content: textToUse.trim(),
-                    audioSrc: wavUrl,
-                    generationEndTime: new Date(),
+                    ...msg, isLoading: false, content: textToUse.trim(), audioSrc: wavUrl, generationEndTime: new Date(),
                 } : msg));
                 
             } catch (error) {
@@ -156,7 +152,6 @@ export const useMessageHandler = ({
             return;
         }
 
-        // --- Imagen Model Logic ---
         if (isImagenModel) {
             logService.info("Handling Imagen model request.");
             const userMessage: ChatMessage = { id: generateUniqueId(), role: 'user', content: textToUse.trim(), timestamp: new Date() };
@@ -165,29 +160,22 @@ export const useMessageHandler = ({
             setMessages(prev => [...prev, userMessage, { id: modelMessageId, role: 'model', content: '', timestamp: new Date(), isLoading: true, generationStartTime: new Date() }]);
             
             try {
-                const imageBase64Array = await geminiServiceInstance.generateImages(keyToUse, activeModelId, textToUse.trim(), aspectRatio, currentSignal);
+                // MODIFIED: Pass appSettings
+                const imageBase64Array = await geminiServiceInstance.generateImages(keyToUse, activeModelId, textToUse.trim(), aspectRatio, currentSignal, appSettings);
 
                 if (currentSignal.aborted) { throw new Error("aborted"); }
 
                 const generatedFiles: UploadedFile[] = imageBase64Array.map((base64Data, index) => {
                     const dataUrl = `data:image/jpeg;base64,${base64Data}`;
                     return {
-                        id: generateUniqueId(),
-                        name: `generated-image-${index + 1}.jpeg`,
-                        type: 'image/jpeg',
-                        size: base64Data.length, // approximation
-                        dataUrl,
-                        base64Data,
-                        uploadState: 'active'
+                        id: generateUniqueId(), name: `generated-image-${index + 1}.jpeg`, type: 'image/jpeg',
+                        size: base64Data.length, dataUrl, base64Data, uploadState: 'active'
                     };
                 });
                 
                 setMessages(prev => prev.map(msg => msg.id === modelMessageId ? {
-                    ...msg,
-                    isLoading: false,
-                    content: `Generated image for: "${textToUse.trim()}"`,
-                    files: generatedFiles,
-                    generationEndTime: new Date(),
+                    ...msg, isLoading: false, content: `Generated image for: "${textToUse.trim()}"`,
+                    files: generatedFiles, generationEndTime: new Date(),
                 } : msg));
                 
             } catch (error) {
@@ -198,15 +186,10 @@ export const useMessageHandler = ({
             }
             return;
         }
-
-        // ---- Regular Text Generation Logic ----
+        
         logService.info("Handling standard text generation request.");
-
-        // If editing, find the point to slice the history.
         const editIndex = effectiveEditingId ? messages.findIndex(m => m.id === effectiveEditingId) : -1;
         const baseMessages = editIndex !== -1 ? messages.slice(0, editIndex) : [...messages];
-
-        // Create the new user message to be sent.
         const successfullyProcessedFiles = filesToUse.filter(f => f.uploadState === 'active' && !f.error && !f.isProcessing);
         const promptParts = buildContentParts(textToUse.trim(), successfullyProcessedFiles);
 
@@ -215,17 +198,14 @@ export const useMessageHandler = ({
         const historyForApi = createChatHistoryForApi(baseMessages);
         const fullHistory: ChatHistoryItem[] = [...historyForApi, { role: 'user', parts: promptParts }];
 
-        // Clean up editing state after use.
         if (effectiveEditingId && !overrideOptions) setEditingMessageId(null);
 
-        // Update UI state with base messages, new user message, and a loading indicator for the model.
         const lastCumulative = baseMessages.length > 0 ? (baseMessages[baseMessages.length - 1].cumulativeTotalTokens || 0) : 0;
         const userMessage: ChatMessage = { id: generateUniqueId(), role: 'user', content: textToUse.trim(), files: successfullyProcessedFiles.length ? successfullyProcessedFiles : undefined, timestamp: new Date(), cumulativeTotalTokens: lastCumulative };
         const modelMessageId = generateUniqueId();
         
         setMessages(() => [
-            ...baseMessages,
-            userMessage,
+            ...baseMessages, userMessage,
             { id: modelMessageId, role: 'model', content: '', thoughts: '', timestamp: new Date(), isLoading: true, generationStartTime: new Date() }
         ]);
 
@@ -242,14 +222,9 @@ export const useMessageHandler = ({
         
             const updatedMessages = [...prevMsgs];
             updatedMessages[loadingMsgIndex] = {
-                ...loadingMsg,
-                isLoading: false,
-                content: finalContent + (isAborted ? "\n\n[Stopped by user]" : ""),
+                ...loadingMsg, isLoading: false, content: finalContent + (isAborted ? "\n\n[Stopped by user]" : ""),
                 thoughts: currentChatSettings.showThoughts ? finalThoughts : loadingMsg.thoughts,
-                generationEndTime: new Date(),
-                promptTokens,
-                completionTokens,
-                totalTokens: turnTokens,
+                generationEndTime: new Date(), promptTokens, completionTokens, totalTokens: turnTokens,
                 cumulativeTotalTokens: prevTotal + turnTokens
             };
         
@@ -267,8 +242,8 @@ export const useMessageHandler = ({
             if (shouldLockKey) {
                 logService.info("Locking API key for this session due to file usage.");
                 const newSettings = { ...currentChatSettings, lockedApiKey: keyToUse };
-                setCurrentChatSettings(() => newSettings); // Update state for next render
-                finalSettings = newSettings; // Use for saving immediately
+                setCurrentChatSettings(() => newSettings);
+                finalSettings = newSettings;
             }
             saveCurrentChatSession(finalMessages, activeSessionId, finalSettings);
             setIsLoading(false);
@@ -298,13 +273,16 @@ export const useMessageHandler = ({
         };
 
         if (appSettings.isStreamingEnabled) {
+            // MODIFIED: Pass appSettings
             await geminiServiceInstance.sendMessageStream(keyToUse, activeModelId, fullHistory, chatSettings.systemInstruction, chatSettings.config, chatSettings.showThoughts, chatSettings.thinkingBudget, currentSignal,
                 (chunk) => setMessages(prev => prev.map(msg => msg.id === modelMessageId ? { ...msg, content: msg.content + chunk, isLoading: true } : msg)),
                 (thoughtChunk) => setMessages(prev => prev.map(msg => msg.id === modelMessageId ? { ...msg, thoughts: (msg.thoughts || '') + thoughtChunk, isLoading: true } : msg)),
                 streamOnError,
-                streamOnComplete
+                streamOnComplete,
+                appSettings
             );
         } else { 
+            // MODIFIED: Pass appSettings
             await geminiServiceInstance.sendMessageNonStream(keyToUse, activeModelId, fullHistory, chatSettings.systemInstruction, chatSettings.config, chatSettings.showThoughts, chatSettings.thinkingBudget, currentSignal,
                 streamOnError,
                 (fullText, thoughtsText, usageMetadata) => {
@@ -313,31 +291,31 @@ export const useMessageHandler = ({
                         handleCompletion(finalMsgs);
                         return finalMsgs;
                     });
-                }
+                },
+                appSettings
             );
         }
     }, [isLoading, inputText, selectedFiles, currentChatSettings, messages, appSettings.isStreamingEnabled, saveCurrentChatSession, activeSessionId, editingMessageId, appSettings, aspectRatio, handleApiError, setMessages, setIsLoading, setInputText, setSelectedFiles, setEditingMessageId, setAppFileError, userScrolledUp, abortControllerRef, setCurrentChatSettings ]);
 
     const handleTextToSpeech = useCallback(async (messageId: string, text: string) => {
-        if (ttsMessageId) return; // Prevent multiple TTS requests at once
+        if (ttsMessageId) return;
 
         const keyResult = getKeyForRequest(appSettings, currentChatSettings);
         if ('error' in keyResult) {
             logService.error("TTS failed:", { error: keyResult.error });
-            // Optionally add error feedback to the user here
             return;
         }
         const { key } = keyResult;
         
         setTtsMessageId(messageId);
         logService.info("Requesting TTS for message", { messageId });
-        // User requested Gemini 2.5 Flash TTS
         const modelId = 'models/gemini-2.5-flash-preview-tts';
         const voice = appSettings.ttsVoice;
         const abortController = new AbortController();
 
         try {
-            const base64Pcm = await geminiServiceInstance.generateSpeech(key, modelId, text, voice, abortController.signal);
+            // MODIFIED: Pass appSettings
+            const base64Pcm = await geminiServiceInstance.generateSpeech(key, modelId, text, voice, abortController.signal, appSettings);
             const wavUrl = pcmBase64ToWavUrl(base64Pcm);
             
             setMessages(prev => prev.map(msg => 
@@ -348,7 +326,6 @@ export const useMessageHandler = ({
 
         } catch (error) {
             logService.error("TTS generation failed:", { messageId, error });
-            // Optionally add error feedback to the user here
         } finally {
             setTtsMessageId(null);
         }
@@ -401,11 +378,6 @@ export const useMessageHandler = ({
             handleStopGenerating();
         }
         
-        // By passing the user message's ID as `editingId`, we leverage the
-        // existing logic in `handleSendMessage` to slice the history and
-        // replace messages from that point forward. This achieves a "retry"
-        // that behaves like an "edit", as requested, without creating
-        // duplicate user message bubbles.
         await handleSendMessage({
             text: userMessageToResend.content,
             files: userMessageToResend.files,
