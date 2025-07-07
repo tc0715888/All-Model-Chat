@@ -60,9 +60,7 @@ export const useFileHandling = ({
 
             let effectiveMimeType = file.type;
             const fileExtension = `.${file.name.split('.').pop()?.toLowerCase()}`;
-
-            // If the MIME type is missing/generic but it has a known text-based extension,
-            // we'll treat it as text/plain. This is the fix.
+            
             if ((!effectiveMimeType || effectiveMimeType === 'application/octet-stream') && TEXT_BASED_EXTENSIONS.includes(fileExtension)) {
                 effectiveMimeType = 'text/plain';
                 logService.debug(`Assigned mimeType 'text/plain' to file ${file.name} based on extension.`);
@@ -82,8 +80,6 @@ export const useFileHandling = ({
             setSelectedFiles(prev => [...prev, initialFileState]);
 
             if (SUPPORTED_IMAGE_MIME_TYPES.includes(effectiveMimeType)) {
-                // Use URL.createObjectURL for efficient, memory-safe previews.
-                // The blob URL is revoked automatically by cleanup effects in App.tsx/useChat.ts.
                 const dataUrl = URL.createObjectURL(file);
                 setSelectedFiles(p => p.map(f => f.id === fileId ? { ...f, dataUrl } : f));
             }
@@ -91,7 +87,8 @@ export const useFileHandling = ({
             setSelectedFiles(prev => prev.map(f => f.id === fileId ? { ...f, progress: 10, uploadState: 'uploading' } : f));
 
             try {
-                const uploadedFileInfo = await geminiServiceInstance.uploadFile(keyToUse, file, mimeTypeForUpload, file.name, controller.signal);
+                // MODIFIED: Pass the appSettings object to the service call.
+                const uploadedFileInfo = await geminiServiceInstance.uploadFile(keyToUse, file, mimeTypeForUpload, file.name, controller.signal, appSettings);
                 logService.info(`File uploaded successfully: ${file.name}`, { fileInfo: uploadedFileInfo });
                 setSelectedFiles(prev => prev.map(f => f.id === fileId ? { ...f, isProcessing: false, progress: 100, fileUri: uploadedFileInfo.uri, fileApiName: uploadedFileInfo.name, rawFile: undefined, uploadState: uploadedFileInfo.state === 'ACTIVE' ? 'active' : (uploadedFileInfo.state === 'PROCESSING' ? 'processing_api' : 'failed'), error: uploadedFileInfo.state === 'FAILED' ? 'File API processing failed' : (f.error || undefined), abortController: undefined, } : f));
             } catch (uploadError) {
@@ -157,7 +154,8 @@ export const useFileHandling = ({
         setSelectedFiles(prev => [...prev, { id: tempId, name: `Loading ${fileApiId}...`, type: 'application/octet-stream', size: 0, isProcessing: true, progress: 50, uploadState: 'processing_api', fileApiName: fileApiId, }]);
 
         try {
-            const fileMetadata = await geminiServiceInstance.getFileMetadata(keyToUse, fileApiId);
+            // MODIFIED: Pass the appSettings object to the service call.
+            const fileMetadata = await geminiServiceInstance.getFileMetadata(keyToUse, fileApiId, appSettings);
             if (fileMetadata) {
                 logService.info(`Successfully fetched metadata for file ID ${fileApiId}`, { metadata: fileMetadata });
                 if (!ALL_SUPPORTED_MIME_TYPES.includes(fileMetadata.mimeType)) {
@@ -185,7 +183,6 @@ export const useFileHandling = ({
         }
     }, [selectedFiles, setSelectedFiles, setAppFileError, appSettings, currentChatSettings, setCurrentChatSettings]);
 
-    // Drag and Drop handlers
     const handleAppDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.types.includes('Files')) setIsAppDraggingOver(true); }, []);
     const handleAppDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); if (isAppProcessingFile) { e.dataTransfer.dropEffect = 'none'; return; } if (e.dataTransfer.types.includes('Files')) { e.dataTransfer.dropEffect = 'copy'; if (!isAppDraggingOver) setIsAppDraggingOver(true); } else e.dataTransfer.dropEffect = 'none'; }, [isAppDraggingOver, isAppProcessingFile]);
     const handleAppDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); if (e.currentTarget.contains(e.relatedTarget as Node)) return; setIsAppDraggingOver(false); }, []);
